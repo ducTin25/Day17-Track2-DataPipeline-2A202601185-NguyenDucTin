@@ -13,19 +13,38 @@
 --
 --   Câu hỏi cần trả lời trước khi sửa:
 --     1. Grain của bảng này là entity hay sự kiện? Khoá tự nhiên là gì?
+--         Grain của bảng là entity (1 hàng / 1 ticket). Khoá tự nhiên là ticket_id. 
+--         Vì vậy, unique_key = 'ticket_id'.
 --     2. Khi không có unique_key, dbt sinh ra câu lệnh ghi nào? Chạy lại
 --        cùng một ngày lần thứ hai thì hàng cũ bị THAY THẾ hay bị GHI THÊM?
+--         Khi không có unique_key, dbt sẽ sinh ra câu lệnh ghi kiểu 'append'. 
+--         Chạy lại cùng một ngày lần thứ hai thì hàng cũ bị GHI THÊM, 
+--         dẫn đến trùng lặp dữ liệu.
 --     3. Nguồn CDC có bản ghi op='u'. Một ticket được tạo ngày D1 và bị sửa
 --        ngày D2 sẽ đi qua mệnh đề WHERE bên dưới mấy lần trong MỘT lượt chạy?
+--         Ticket sẽ đi qua 2 lần trong một lượt chạy: lần đầu tiên khi được tạo ra
+--         (D1) và lần thứ hai khi bị sửa (D2). WHERE theo run_date sẽ lọc ra 
+--         lần thứ hai (D2) vì D2 >= run_date.
 --     4. Với dữ liệu như vậy, chiến lược nào phù hợp: 'append',
 --        'delete+insert' theo partition ngày, hay 'merge' theo khoá?
---
+--         Chiến lược phù hợp là 'merge' theo khoá. Lý do:
+--          - ticket_id là khoá tự nhiên, có thể dùng để xác định duy nhất một ticket.
+--          - Khi ticket được cập nhật, hàng cũ cần được ghi đè bằng trạng thái mới.
+--          - Khi job retry, dữ liệu không bị trùng lặp vì dbt sẽ merge 
+--          theo khoá ticket_id.
+--         append: không phù hợp vì sẽ tạo ra trùng lặp dữ liệu. 
+--         delete+insert theo partition ngày: không phù hợp vì sẽ xóa nhầm 
+--         các ticket được tạo trước ngày run_date nhưng được cập nhật sau ngày 
+--         run_date.
 --   Lưu ý: mệnh đề WHERE theo run_date bên dưới KHÔNG phải lỗi. Nó tồn tại để
 --   backfill một ngày không phải quét lại toàn bộ lịch sử. Giữ nguyên nó.
 -- ---------------------------------------------------------------------------
 
 {{ config(
     materialized     = 'incremental',
+    on_schema_change = 'fail',
+    unique_key       = 'ticket_id',
+    incremental_strategy = 'merge',
     on_schema_change = 'fail'
 ) }}
 
